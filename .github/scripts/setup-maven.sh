@@ -3,10 +3,9 @@
 
 set -e
 
-# Check if pom.xml exists
-if [ ! -f "pom.xml" ]; then
-  echo "Creating pom.xml..."
-  cat > pom.xml << 'EOF'
+# Create pom.xml
+echo "Creating pom.xml..."
+cat > pom.xml << 'EOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -82,6 +81,5 @@ if [ ! -f "pom.xml" ]; then
     </build>
 </project>
 EOF
-fi
 
 echo "Maven setup completed!"

@@ -36,7 +36,7 @@ jobs:
         run: |
           chmod +x .github/scripts/setup-gradle.sh
           .github/scripts/setup-gradle.sh
-          ./gradlew clean build -x test
+          gradle clean build -x test
 
       - name: Upload Maven artifacts
         if: matrix.build-tool == 'maven'

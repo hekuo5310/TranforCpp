@@ -54,9 +54,4 @@ processResources {
 EOF
 fi
 
-# Ensure gradlew has execute permission
-if [ -f "gradlew" ]; then
-    chmod +x gradlew
-fi
-
 echo "Gradle setup completed!"
