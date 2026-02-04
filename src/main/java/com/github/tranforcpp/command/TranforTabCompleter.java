@@ -8,31 +8,43 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class TranforTabCompleter implements TabCompleter {
+    
+    private static final String[] ALL_COMMANDS = {"reload", "version"};
+    private static final String[] RELOAD_ONLY = {"reload"};
+    private static final String[] VERSION_ONLY = {"version"};
+    private static final String[] EMPTY_ARRAY = new String[0];
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        List<String> completions = new ArrayList<>();
-        
-        if (args.length == 1) {
-            if (sender.hasPermission("tranforcpp.reload")) {
-                completions.add("reload");
-            }
-            if (sender.hasPermission("tranforcpp.version")) {
-                completions.add("version");
-            }
-
-            return filterCompletions(completions, args[0]);
+        if (args.length != 1) {
+            return java.util.Collections.emptyList();
         }
-        return completions;
+        
+        String input = args[0].toLowerCase();
+        String[] candidates = getCandidates(sender);
+        
+        List<String> result = new ArrayList<>(candidates.length);
+        for (String candidate : candidates) {
+            if (candidate.startsWith(input)) {
+                result.add(candidate);
+            }
+        }
+        
+        return result;
     }
     
-    private List<String> filterCompletions(List<String> completions, String input) {
-        List<String> filtered = new ArrayList<>();
-        for (String completion : completions) {
-            if (completion.toLowerCase().startsWith(input.toLowerCase())) {
-                filtered.add(completion);
-            }
+    private String[] getCandidates(CommandSender sender) {
+        boolean canReload = sender.hasPermission("tranforcpp.reload");
+        boolean canVersion = sender.hasPermission("tranforcpp.version");
+        
+        if (canReload && canVersion) {
+            return ALL_COMMANDS;
+        } else if (canReload) {
+            return RELOAD_ONLY;
+        } else if (canVersion) {
+            return VERSION_ONLY;
+        } else {
+            return EMPTY_ARRAY;
         }
-        return filtered;
     }
 }

@@ -9,7 +9,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 
 import java.lang.reflect.Field;
 
-public class  TranforCPlusPlus extends JavaPlugin {
+public class TranforCPlusPlus extends JavaPlugin {
 
     private static TranforCPlusPlus instance;
     private ProcessManager processManager;
@@ -21,22 +21,16 @@ public class  TranforCPlusPlus extends JavaPlugin {
     public void onEnable() {
         instance = this;
         
-        try {
-            registerTranforCommand();
-        } catch (Exception e) {
-            getLogger().severe("命令注册失败: " + e.getMessage());
-        }
+        registerTranforCommand();
         
         startupManager = new StartupManager(this);
         startupManager.startAsync();
         
-        // 初始化内存优化器
         memoryOptimizer = new MemoryOptimizer(this);
         memoryOptimizer.initialize();
         
-        // 根据环境智能初始化消息通道
         com.github.tranforcpp.command.SmartEventDispatcher eventDispatcher = 
-            new com.github.tranforcpp.command.SmartEventDispatcher(this);
+            new com.github.tranforcpp.command.SmartEventDispatcher();
         eventDispatcher.initialize();
         
         if (eventDispatcher.isUsingMessagingChannel()) {
@@ -44,18 +38,20 @@ public class  TranforCPlusPlus extends JavaPlugin {
             messagingManager.initialize();
         }
 
-        PluginListListener pluginListListener = new PluginListListener();
-        getServer().getPluginManager().registerEvents(pluginListListener, this);
+        getServer().getPluginManager().registerEvents(new PluginListListener(), this);
     }
     
-    private void registerTranforCommand() throws Exception {
-        Field commandMapField = getServer().getClass().getDeclaredField("commandMap");
-        commandMapField.setAccessible(true);
-        CommandMap commandMap = (CommandMap) commandMapField.get(getServer());
-        
-        Command tranforCommand = createTranforCommand();
-        
-        commandMap.register("tranforcpp", tranforCommand);
+    private void registerTranforCommand() {
+        try {
+            Field commandMapField = getServer().getClass().getDeclaredField("commandMap");
+            commandMapField.setAccessible(true);
+            CommandMap commandMap = (CommandMap) commandMapField.get(getServer());
+            
+            Command tranforCommand = createTranforCommand();
+            commandMap.register("tranforcpp", tranforCommand);
+        } catch (Exception e) {
+            getLogger().warning("命令注册失败了!!!bro!!!");
+        }
     }
     
     private Command createTranforCommand() {
@@ -69,8 +65,7 @@ public class  TranforCPlusPlus extends JavaPlugin {
             }
             
             @Override
-            @org.jetbrains.annotations.NotNull
-            public java.util.List<String> tabComplete(@org.jetbrains.annotations.NotNull org.bukkit.command.CommandSender sender, @org.jetbrains.annotations.NotNull String alias, @org.jetbrains.annotations.NotNull String[] args) throws IllegalArgumentException {
+            public java.util.List<String> tabComplete(org.bukkit.command.CommandSender sender, String alias, String[] args) {
                 java.util.List<String> result = tabCompleter.onTabComplete(sender, this, alias, args);
                 return result != null ? result : new java.util.ArrayList<>();
             }
@@ -98,7 +93,7 @@ public class  TranforCPlusPlus extends JavaPlugin {
         if (memoryOptimizer != null) {
             memoryOptimizer.shutdown();
         }
-        getLogger().info("TranforC++ disabled!");
+        getLogger().info("TranforC++模块插件 已关闭!");
     }
 
     public static TranforCPlusPlus getInstance() {
@@ -114,15 +109,14 @@ public class  TranforCPlusPlus extends JavaPlugin {
     }
 
     public void reload() {
-        processManager.restart();
-        getLogger().info("TranforC++ reloaded!");
+        if (processManager != null) {
+            processManager.restart();
+        }
+        getLogger().info("TranforC++ 已重载!");
     }
     
     public com.github.tranforcpp.channel.PluginMessagingManager getMessagingManager() {
         return messagingManager;
     }
-    
-    public MemoryOptimizer getMemoryOptimizer() {
-        return memoryOptimizer;
-    }
+
 }

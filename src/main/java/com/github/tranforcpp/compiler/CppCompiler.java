@@ -9,6 +9,26 @@ import java.util.logging.Level;
 
 public class CppCompiler {
 
+    private static final java.util.concurrent.ConcurrentHashMap<String, CachedCompileResult> compileCache = 
+        new java.util.concurrent.ConcurrentHashMap<>();
+    private static final long CACHE_EXPIRY_TIME = 300000L; // 5分钟
+    
+    private static class CachedCompileResult {
+        final File executable;
+        final long timestamp;
+        final int fileCount;
+        
+        CachedCompileResult(File exe, int count) {
+            this.executable = exe;
+            this.fileCount = count;
+            this.timestamp = System.currentTimeMillis();
+        }
+        
+        boolean isExpired() {
+            return System.currentTimeMillis() - timestamp > CACHE_EXPIRY_TIME;
+        }
+    }
+    
     public File compile(File cppDir) {
         List<File> cppFiles = findCppFiles(cppDir);
         if (cppFiles.isEmpty()) {
@@ -76,7 +96,6 @@ public class CppCompiler {
                 return null;
             }
 
-
             return outputFile;
 
         } catch (IOException | InterruptedException e) {
@@ -109,7 +128,6 @@ public class CppCompiler {
     
     private String detectCompiler(boolean isWindows) {
         if (isWindows) {
-
             String[] windowsCompilers = {
                 "g++",
                 "C:\\msys64\\mingw64\\bin\\g++.exe",
@@ -128,7 +146,6 @@ public class CppCompiler {
             }
             return null;
         } else {
-
             return isCompilerAvailable("g++") ? "g++" : null;
         }
     }
@@ -140,7 +157,6 @@ public class CppCompiler {
             boolean isWindows = os.contains("win");
             
             if (isWindows) {
-
                 if (compilerPath.equals("cl.exe")) {
                     pb = new ProcessBuilder("cmd", "/c", "where", "cl");
                 } else {
@@ -163,7 +179,24 @@ public class CppCompiler {
         if (!cppDir.exists()) {
             return 0;
         }
-        return findCppFiles(cppDir).size();
+        
+        String cacheKey = cppDir.getAbsolutePath();
+        CachedCompileResult cached = compileCache.get(cacheKey);
+        
+        if (cached != null && !cached.isExpired()) {
+            return cached.fileCount;
+        }
+        
+        List<File> files = findCppFiles(cppDir);
+        int count = files.size();
+
+        if (count > 0) {
+            File dummyExecutable = new File(cppDir, "dummy.exe");
+            compileCache.put(cacheKey, new CachedCompileResult(dummyExecutable, count));
+            TranforCPlusPlus.getInstance().getLogger().fine("缓存更新: " + count + " 个插件文件");
+        }
+        
+        return count;
     }
     
     public File getCppDirectory() {
@@ -177,4 +210,8 @@ public class CppCompiler {
         }
         return findCppFiles(cppDir);
     }
+    
+
+    
+
 }

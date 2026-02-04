@@ -18,7 +18,7 @@ public class PluginListListener implements Listener {
     @EventHandler
     public void onPlayerCommand(PlayerCommandPreprocessEvent event) {
         String message = event.getMessage().toLowerCase().trim();
-        if (message.equals("/pl") || message.equals("/plugins") || message.equals("/plugin")) {
+        if (message.equals("/pl") || message.equals("/plugins")) {
             Bukkit.getScheduler().runTaskLater(
                 com.github.tranforcpp.TranforCPlusPlus.getInstance(), 
                 () -> showTranforCPlugins(event.getPlayer()), 
@@ -30,10 +30,10 @@ public class PluginListListener implements Listener {
     @EventHandler
     public void onServerCommand(ServerCommandEvent event) {
         String command = event.getCommand().toLowerCase().trim();
-        if (command.equals("pl") || command.equals("plugins") || command.equals("plugin")) {
+        if (command.equals("pl") || command.equals("plugins")) {
             Bukkit.getScheduler().runTaskLater(
-                com.github.tranforcpp.TranforCPlusPlus.getInstance(), 
-                () -> showTranforCPlugins(event.getSender()), 
+                com.github.tranforcpp.TranforCPlusPlus.getInstance(),
+                () -> showTranforCPlugins(event.getSender()),
                 1L
             );
         }
@@ -50,14 +50,13 @@ public class PluginListListener implements Listener {
         List<File> cppFiles = compiler.getPluginFiles();
         
         if (!cppFiles.isEmpty()) {
-            sender.sendMessage(mm.deserialize("<aqua>□<white>C++ Plugins (<white>" + cppFiles.size() + "<white>):"));
-            sender.sendMessage(mm.deserialize("<aqua>TranforC++ Plugins (<aqua>" + cppFiles.size() + "<aqua>):"));
+            sender.sendMessage(mm.deserialize("<aqua>□ <white>C++ Plugins (<white>" + cppFiles.size() + "<white>):"));
             
             StringBuilder pluginNames = new StringBuilder();
             for (int i = 0; i < cppFiles.size(); i++) {
                 File file = cppFiles.get(i);
                 String fileName = file.getName().replace(".cpp", "");
-                pluginNames.append("<dark_gray> - <green>").append(fileName);
+                pluginNames.append("<dark_gray>- <green>").append(fileName);
                 if (i < cppFiles.size() - 1) {
                     pluginNames.append("<gray>, ");
                 }

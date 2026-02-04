@@ -20,7 +20,6 @@ public class MemoryOptimizer {
     
     private static final long CLEANUP_INTERVAL = 300000L;
     private static final long MONITOR_INTERVAL = 60000L;
-    private static final long CACHE_EXPIRY_TIME = 1800000L;
     
     public MemoryOptimizer(TranforCPlusPlus plugin) {
         this.plugin = plugin;
@@ -33,35 +32,35 @@ public class MemoryOptimizer {
     }
     
     private void startCleanupTask() {
-        cleanupTask = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, () -> {
-            cleanupExpiredCache();
-            cleanObjectPool();
-            triggerGarbageCollectionIfNeeded();
-        }, CLEANUP_INTERVAL, CLEANUP_INTERVAL);
+        cleanupTask = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::performCleanup, 
+            CLEANUP_INTERVAL, CLEANUP_INTERVAL);
     }
     
     private void startMonitorTask() {
-        monitorTask = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, () -> {
-            logMemoryStatistics();
-            checkMemoryPressure();
-        }, MONITOR_INTERVAL, MONITOR_INTERVAL);
+        monitorTask = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, this::monitorMemory, 
+            MONITOR_INTERVAL, MONITOR_INTERVAL);
     }
     
-    public void addObjectToPool(String key, Object obj) {
-        objectPool.put(key, obj);
-        cacheExpiry.put(key, System.currentTimeMillis() + CACHE_EXPIRY_TIME);
+    private void performCleanup() {
+        cleanupExpiredCache();
+        cleanObjectPool();
+        triggerGarbageCollectionIfNeeded();
+    }
+    
+    private void monitorMemory() {
+        checkMemoryPressure();
     }
     
     private void cleanupExpiredCache() {
         long currentTime = System.currentTimeMillis();
         
-        for (String key : cacheExpiry.keySet()) {
-            Long expiryTime = cacheExpiry.get(key);
-            if (expiryTime != null && currentTime > expiryTime) {
-                objectPool.remove(key);
-                cacheExpiry.remove(key);
+        cacheExpiry.entrySet().removeIf(entry -> {
+            if (currentTime > entry.getValue()) {
+                objectPool.remove(entry.getKey());
+                return true;
             }
-        }
+            return false;
+        });
     }
     
     private void cleanObjectPool() {
@@ -99,14 +98,7 @@ public class MemoryOptimizer {
     private void forceCleanup() {
         objectPool.clear();
         cacheExpiry.clear();
-        
         System.gc();
-    }
-    
-    private void logMemoryStatistics() {
-    }
-    
-    private void logMemoryInfo() {
     }
     
     public void shutdown() {

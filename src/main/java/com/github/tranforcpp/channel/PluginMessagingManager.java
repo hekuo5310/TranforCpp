@@ -8,49 +8,32 @@ import org.bukkit.entity.Player;
 import org.bukkit.plugin.messaging.PluginMessageListener;
 
 import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
-/**
- * 插件消息通道管理器
- * 实现跨插件通信和跨版本兼容
- */
 public class PluginMessagingManager implements PluginMessageListener {
+    
+    public static final String CHANNEL_TRANFORCPP = "tranforcpp:events";
+    public static final String CHANNEL_BUNGEECORD = "BungeeCord";
     
     private final TranforCPlusPlus plugin;
     private final Gson gson = new Gson();
-    private final Set<String> registeredChannels = ConcurrentHashMap.newKeySet();
+    private final Set<String> registeredChannels = new HashSet<>();
     private final AtomicLong messageCounter = new AtomicLong(0);
-    private volatile boolean initialized = false;
-    
-    // 消息通道标识符
-    public static final String CHANNEL_TRANFORCPP = "tranforcpp:events";
-    public static final String CHANNEL_BUNGEECORD = "BungeeCord";
+    private boolean initialized = false;
     
     public PluginMessagingManager(TranforCPlusPlus plugin) {
         this.plugin = plugin;
     }
     
-    /**
-     * 初始化消息通道
-     */
     public void initialize() {
-        if (initialized) {
-            return;
-        }
-
         registerChannel(CHANNEL_TRANFORCPP);
-
         registerChannel(CHANNEL_BUNGEECORD);
         
         initialized = true;
     }
     
-    /**
-     * 注册消息通道
-     * @param channel 通道名称
-     */
     private void registerChannel(String channel) {
         if (registeredChannels.contains(channel)) {
             return;
@@ -65,11 +48,6 @@ public class PluginMessagingManager implements PluginMessageListener {
         }
     }
     
-    /**
-     * 向所有在线玩家广播事件消息
-     * @param eventName 事件名称
-     * @param args 事件参数
-     */
     public void broadcastEvent(String eventName, Object... args) {
         if (!initialized) {
             return;
@@ -89,7 +67,7 @@ public class PluginMessagingManager implements PluginMessageListener {
             
             String jsonData = gson.toJson(message);
             byte[] data = jsonData.getBytes(StandardCharsets.UTF_8);
-
+            
             Player[] players = Bukkit.getOnlinePlayers().toArray(new Player[0]);
             int sentCount = 0;
             
@@ -114,11 +92,6 @@ public class PluginMessagingManager implements PluginMessageListener {
         }
     }
     
-
-    
-    /**
-     * 处理接收到的插件消息
-     */
     @Override
     public void onPluginMessageReceived(String channel, Player player, byte[] message) {
         if (!initialized || !channel.equals(CHANNEL_TRANFORCPP)) {
@@ -146,9 +119,6 @@ public class PluginMessagingManager implements PluginMessageListener {
         }
     }
     
-    /**
-     * 清理资源
-     */
     public void cleanup() {
         if (!initialized) {
             return;
@@ -170,8 +140,4 @@ public class PluginMessagingManager implements PluginMessageListener {
         
         plugin.getLogger().info("插件消息通道已清理，总计处理消息: " + totalMessages);
     }
-    
-
-    
-
 }

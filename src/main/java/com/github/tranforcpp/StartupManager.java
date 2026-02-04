@@ -14,9 +14,14 @@ public class StartupManager {
     
     public StartupManager(TranforCPlusPlus plugin) {
         this.plugin = plugin;
-        this.startupExecutor = Executors.newFixedThreadPool(
-            Math.max(2, Runtime.getRuntime().availableProcessors() / 2)
-        );
+        int optimalThreads = calculateOptimalThreadCount();
+        this.startupExecutor = Executors.newFixedThreadPool(optimalThreads);
+        plugin.getLogger().fine("启动管理器使用 " + optimalThreads + " 个工作线程");
+    }
+    
+    private int calculateOptimalThreadCount() {
+        int cores = Runtime.getRuntime().availableProcessors();
+        return Math.max(2, Math.min(cores * 2, 8));
     }
     
     public void startAsync() {
@@ -30,17 +35,19 @@ public class StartupManager {
                 int pluginCount = compiler.countPlugins();
 
                 com.github.tranforcpp.command.SmartEventDispatcher eventDispatcher = 
-                    new com.github.tranforcpp.command.SmartEventDispatcher(plugin);
+                    new com.github.tranforcpp.command.SmartEventDispatcher();
                 eventDispatcher.initialize();
-                String environmentInfo = eventDispatcher.getEnvironmentSummary();
+                String environmentInfo = eventDispatcher.getFullEnvironmentInfo();
 
                 String[] logoLines = {
-                    "        ████████╗  ███████╗   ██████╗   ",
-                    "        ╚══██╔══╝  ██╔════╝  ██╔════╝   ",
-                    "           ██║     █████╗    ██║        ",
-                    "           ██║     ██╔══╝    ██║        ",
-                    "           ██║     ██║       ╚██████╗   ",
-                    "           ╚═╝     ╚═╝        ╚═════╝   ",
+                    "                                             ",
+                    "         ████████╗  ███████╗   ██████╗        ",
+                    "         ╚══██╔══╝  ██╔════╝  ██╔════╝        ",
+                    "            ██║     █████╗    ██║             ",
+                    "            ██║     ██╔══╝    ██║             ",
+                    "            ██║     ██║       ╚██████╗        ",
+                    "            ╚═╝     ╚═╝        ╚═════╝        ",
+                    "                                             ",
                 };
 
                 String[] coloredLogo = AnsiColorUtils.createGradientText(logoLines, AnsiColorUtils.LOGO_GRADIENT);
@@ -48,10 +55,10 @@ public class StartupManager {
                     plugin.getLogger().info(line);
                 }
 
-                plugin.getLogger().info(AnsiColorUtils.colorize("             <TranforC++> 插件已启动", AnsiColorUtils.COLOR_51));
-                plugin.getLogger().info(AnsiColorUtils.colorize("               当前插件版本: " + plugin.getPluginMeta().getVersion(), AnsiColorUtils.COLOR_51));
+                plugin.getLogger().info(AnsiColorUtils.colorize("              TranforC++ 模块已启动", AnsiColorUtils.COLOR_51));
+                plugin.getLogger().info(AnsiColorUtils.colorize("               当前模块版本: " + plugin.getPluginMeta().getVersion(), AnsiColorUtils.COLOR_51));
                 plugin.getLogger().info(AnsiColorUtils.colorize("           C+Plugins目录中发现 " + pluginCount + " 个插件", AnsiColorUtils.COLOR_51));
-                plugin.getLogger().info(AnsiColorUtils.colorize("" + environmentInfo, AnsiColorUtils.COLOR_51));
+                plugin.getLogger().info(AnsiColorUtils.colorize(environmentInfo, AnsiColorUtils.COLOR_51));
 
             })
             .exceptionally(throwable -> {
@@ -68,7 +75,7 @@ public class StartupManager {
             plugin.setProcessManager(new ProcessManager(plugin));
             plugin.getProcessManager().start();
         } catch (Exception e) {
-            plugin.getLogger().log(Level.WARNING, "进程管理器设置失败: " + e.getMessage(), e);
+            plugin.getLogger().log(Level.WARNING, "多进程设置失败: " + e.getMessage(), e);
         }
     }
     

@@ -1,5 +1,5 @@
 name: TranforCPlusPlus
-version: '1.1.0'
+version: '1.1.1'
 main: com.github.tranforcpp.TranforCPlusPlus
 api-version: '1.20'
 author: 'hekuo,Xiao-QDev'

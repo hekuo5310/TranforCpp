@@ -6,7 +6,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -49,20 +48,22 @@ public class ProcessManager implements Listener {
     private BufferedReader inputReader;
     private BufferedWriter outputWriter;
     private final Gson gson = new Gson();
-    private final ConcurrentLinkedQueue<JsonObject> messageQueue = new ConcurrentLinkedQueue<>();
+    private final java.util.concurrent.ArrayBlockingQueue<JsonObject> messageQueue = 
+        new java.util.concurrent.ArrayBlockingQueue<>(MAX_QUEUE_SIZE);
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicLong messageCounter = new AtomicLong(0);
     private volatile Thread readerThread;
-    private volatile Thread senderThread;
+    private volatile java.util.concurrent.ExecutorService senderExecutor;
+    private final java.util.concurrent.atomic.AtomicInteger activeSenders = 
+        new java.util.concurrent.atomic.AtomicInteger(0);
     private final MiniMessage miniMessageInstance;
-    private final MemoryOptimizer memoryOptimizer;
 
-    private static final int MAX_QUEUE_SIZE = 1000;
+    private static final int MAX_QUEUE_SIZE = 2000;
+    private static final int CORE_SENDER_THREADS = 2;
 
     public ProcessManager(TranforCPlusPlus plugin) {
         this.plugin = plugin;
         this.miniMessageInstance = MiniMessage.miniMessage();
-        this.memoryOptimizer = plugin.getMemoryOptimizer();
         Bukkit.getPluginManager().registerEvents(this, plugin);
     }
 
@@ -94,10 +95,7 @@ public class ProcessManager implements Listener {
             readerThread.setPriority(Thread.NORM_PRIORITY);
             readerThread.start();
 
-            senderThread = new Thread(this::sendMessages, "TranforC++-Sender");
-            senderThread.setDaemon(true);
-            senderThread.setPriority(Thread.NORM_PRIORITY);
-            senderThread.start();
+            initializeSenderExecutor();
 
             running.set(true);
             plugin.getLogger().info("C++ plugin process started with performance optimizations");
@@ -129,31 +127,38 @@ public class ProcessManager implements Listener {
         }
     }
 
-    private void sendMessages() {
+    private void initializeSenderExecutor() {
+        senderExecutor = java.util.concurrent.Executors.newFixedThreadPool(
+            CORE_SENDER_THREADS,
+            r -> {
+                Thread t = new Thread(r, "TranforC++-Sender-" + activeSenders.incrementAndGet());
+                t.setDaemon(true);
+                t.setPriority(Thread.NORM_PRIORITY - 1);
+                return t;
+            }
+        );
+        
+        for (int i = 0; i < CORE_SENDER_THREADS; i++) {
+            senderExecutor.submit(this::sendMessagesWorker);
+        }
+    }
+    
+    private void sendMessagesWorker() {
         try {
             while (running.get() && process != null && process.isAlive()) {
-                JsonObject msg = messageQueue.poll();
+                JsonObject msg = messageQueue.poll(50, java.util.concurrent.TimeUnit.MILLISECONDS);
                 if (msg != null) {
                     outputWriter.write(gson.toJson(msg));
                     outputWriter.newLine();
-                    if (messageQueue.size() < 10) {
+                    if (messageQueue.size() < 20) {
                         outputWriter.flush();
                     }
                     messageCounter.incrementAndGet();
-                } else {
-                    synchronized (messageQueue) {
-                        if (messageQueue.isEmpty()) {
-                            messageQueue.wait(50);
-                        }
-                    }
                 }
-            }
-            if (outputWriter != null) {
-                outputWriter.flush();
             }
         } catch (InterruptedException | IOException e) {
             if (running.get()) {
-                plugin.getLogger().warning("Error sending messages to C++: " + e.getMessage());
+                plugin.getLogger().warning("Error in message sender worker: " + e.getMessage());
             }
         }
     }
@@ -161,7 +166,7 @@ public class ProcessManager implements Listener {
     private void handleCppMessage(JsonObject json) {
         try {
             String action = json.get("action").getAsString();
-
+            
             switch (action) {
                 case "broadcast":
                     handleBroadcast(json);
@@ -171,9 +176,6 @@ public class ProcessManager implements Listener {
                     break;
                 case "console":
                     plugin.getLogger().info(json.get("message").getAsString());
-                    break;
-                case "dispatchCommand":
-                    handleDispatchCommand(json);
                     break;
                 default:
                     plugin.getLogger().warning("Unknown action: " + action);
@@ -209,25 +211,12 @@ public class ProcessManager implements Listener {
         }
     }
 
-    private void handleDispatchCommand(JsonObject json) {
-        try {
-            String command = json.get("command").getAsString();
-            boolean sync = json.has("sync") && json.get("sync").getAsBoolean();
-
-            if (sync) {
-                Bukkit.getScheduler().runTask(plugin, () -> {
-                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
-                });
-            } else {
-                Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-                    Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
-                });
-            }
-        } catch (Exception e) {
-            plugin.getLogger().warning("Error dispatching command: " + e.getMessage());
-        }
-    }
-
+    private final java.util.Queue<JsonObject> batchBuffer = new java.util.LinkedList<>();
+    private static final int BATCH_SIZE = 30;
+    private static final long BATCH_TIMEOUT_MS = 50;
+    private static final int MAX_BATCH_PROCESSING_TIME = 5; // 毫秒
+    private volatile long lastBatchTime = System.currentTimeMillis();
+    
     public void sendEvent(String eventName, Object... args) {
         if (!running.get()) {
             return;
@@ -238,123 +227,105 @@ public class ProcessManager implements Listener {
             return;
         }
         
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            try {
-                // 使用内存优化器的对象池
-                String poolKey = "event_" + eventName + "_" + System.nanoTime();
-                JsonObject json = new JsonObject();
-                json.addProperty("event", eventName);
-                
-                com.google.gson.JsonArray argsArray = new com.google.gson.JsonArray();
-                for (Object arg : args) {
-                    argsArray.add(arg != null ? arg.toString() : "null");
+        try {
+            JsonObject json = new JsonObject();
+            json.addProperty("event", eventName);
+            
+            com.google.gson.JsonArray argsArray = new com.google.gson.JsonArray();
+            for (Object arg : args) {
+                argsArray.add(arg != null ? arg.toString() : "null");
+            }
+            json.add("args", argsArray);
+            
+            synchronized (batchBuffer) {
+                batchBuffer.offer(json);
+                if (batchBuffer.size() >= BATCH_SIZE || 
+                    System.currentTimeMillis() - lastBatchTime > BATCH_TIMEOUT_MS) {
+                    flushBatch();
                 }
-                json.add("args", argsArray);
-                
-                // 将对象添加到内存优化器的对象池
-                if (memoryOptimizer != null) {
-                    memoryOptimizer.addObjectToPool(poolKey, json);
-                }
-                
+            }
+
+            dispatchToOtherPluginsSync(eventName, args);
+            
+        } catch (Exception e) {
+            plugin.getLogger().warning("Error sending event " + eventName + ": " + e.getMessage());
+        }
+    }
+    
+    private void flushBatch() {
+        if (batchBuffer.isEmpty()) return;
+        
+        long startTime = System.nanoTime();
+        java.util.List<JsonObject> batch = new java.util.ArrayList<>(Math.min(batchBuffer.size(), BATCH_SIZE));
+        JsonObject msg;
+        int processed = 0;
+        
+        while (processed < BATCH_SIZE && (msg = batchBuffer.poll()) != null) {
+            batch.add(msg);
+            processed++;
+            
+            // 防止单次批处理时间过长
+            if ((System.nanoTime() - startTime) / 1_000_000 > MAX_BATCH_PROCESSING_TIME) {
+                break;
+            }
+        }
+        
+        if (!batch.isEmpty()) {
+            boolean queueHasSpace = messageQueue.size() < (MAX_QUEUE_SIZE * 0.8);
+            if (queueHasSpace) {
+                messageQueue.addAll(batch);
                 synchronized (messageQueue) {
-                    messageQueue.add(json);
                     messageQueue.notify();
                 }
-
-                dispatchToOtherPluginsAsync(eventName, args);
-                
-            } catch (Exception e) {
-                plugin.getLogger().warning("Error sending event " + eventName + ": " + e.getMessage());
+            } else {
+                plugin.getLogger().warning("消息队列接近容量上限，跳过本次批处理");
             }
-        });
-    }
-    
-    /**
-     * 异步分发事件到其他插件
-     * @param eventName 事件名称
-     * @param args 事件参数
-     */
-    private void dispatchToOtherPluginsAsync(String eventName, Object... args) {
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            try {
-                org.bukkit.event.Event customEvent = createCustomEvent(eventName, args);
-                Bukkit.getPluginManager().callEvent(customEvent);
-
-                if (plugin.getMessagingManager() != null) {
-                    plugin.getMessagingManager().broadcastEvent(eventName, args);
-                }
-                
-            } catch (Exception e) {
-                plugin.getLogger().warning("事件分发失败: " + e.getMessage());
-            }
-        });
-    }
-    
-    /**
-     * 根据事件名称创建对应的自定义事件对象
-     * @param eventName 事件名称
-     * @param args 事件参数
-     * @return 自定义事件对象
-     */
-    private org.bukkit.event.Event createCustomEvent(String eventName, Object... args) {
-        GenericTranforCEvent event = new GenericTranforCEvent(eventName, args);
-        long timestamp = event.getTimestamp();
-        int argCount = event.getArgCount();
-        long creationTime = event.getCreationNanoTime();
-        long processingTime = event.getProcessingTimeNanos();
-        
-        if (argCount > 0) {
-            plugin.getLogger().fine("Created event '" + eventName + "' with " + argCount + " arguments at " + timestamp + " (creation: " + creationTime + " ns, processing: " + processingTime + " ns)");
         }
-        return event;
+        
+        lastBatchTime = System.currentTimeMillis();
     }
     
-    /**
-     * 通用的TranforC++事件类
-     */
+    private void dispatchToOtherPluginsSync(String eventName, Object... args) {
+        try {
+            org.bukkit.event.Event customEvent = createCustomEvent(eventName, args);
+            Bukkit.getPluginManager().callEvent(customEvent);
+
+            if (plugin.getMessagingManager() != null) {
+                plugin.getMessagingManager().broadcastEvent(eventName, args);
+            }
+        } catch (Exception e) {
+            plugin.getLogger().warning("事件分发失败: " + e.getMessage());
+        }
+    }
+    
+    private org.bukkit.event.Event createCustomEvent(String eventName, Object... args) {
+        return new GenericTranforCEvent(eventName, args);
+    }
+    
     public static class GenericTranforCEvent extends org.bukkit.event.Event {
         private static final org.bukkit.event.HandlerList handlers = new org.bukkit.event.HandlerList();
         private final String eventName;
         private final Object[] args;
-        private final long timestamp;
-        private final long creationNanoTime;
-        
         public GenericTranforCEvent(String eventName, Object... args) {
             super(false);
             this.eventName = eventName;
             this.args = args;
-            this.timestamp = System.currentTimeMillis();
-            this.creationNanoTime = System.nanoTime();
         }
         
         public String getEventName() { return eventName; }
-        public Object[] getArgs() {
-            return args != null ? args.clone() : new Object[0]; 
-        }
+
         public Object getArg(int index) {
             return index >= 0 && index < args.length ? args[index] : null;
         }
-        public long getTimestamp() { return timestamp; }
+
         public int getArgCount() { return args.length; }
-        public long getCreationNanoTime() { return creationNanoTime; }
-        
-        /**
-         * 计算事件从创建到现在的处理时间（纳秒）
-         * @return 处理时间纳秒数
-         */
-        public long getProcessingTimeNanos() {
-            return System.nanoTime() - creationNanoTime;
-        }
-        
+
         @Override
         public org.bukkit.event.HandlerList getHandlers() { return handlers; }
-        public static org.bukkit.event.HandlerList getHandlerList() { return handlers; }
+
+
     }
     
-
-    
-
-
     public void stop() {
         running.set(false);
 
@@ -389,12 +360,20 @@ public class ProcessManager implements Listener {
         if (readerThread != null && readerThread.isAlive()) {
             readerThread.interrupt();
         }
-        if (senderThread != null && senderThread.isAlive()) {
-            senderThread.interrupt();
+        if (senderExecutor != null && !senderExecutor.isShutdown()) {
+            senderExecutor.shutdown();
+            try {
+                if (!senderExecutor.awaitTermination(3, java.util.concurrent.TimeUnit.SECONDS)) {
+                    senderExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                senderExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
         }
 
         readerThread = null;
-        senderThread = null;
+        senderExecutor = null;
         inputReader = null;
         outputWriter = null;
         process = null;
@@ -423,8 +402,6 @@ public class ProcessManager implements Listener {
     public void onPlayerQuit(PlayerQuitEvent event) {
         sendEvent("PlayerQuit", event.getPlayer().getName());
     }
-
-
 
     @EventHandler
     public void onBlockBreak(BlockBreakEvent event) {

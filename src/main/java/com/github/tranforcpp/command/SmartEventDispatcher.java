@@ -1,12 +1,14 @@
 package com.github.tranforcpp.command;
 
-import com.github.tranforcpp.TranforCPlusPlus;
+
 import org.bukkit.Bukkit;
 
 public class SmartEventDispatcher {
     private boolean useMessagingChannel;
+
     
-    public SmartEventDispatcher(TranforCPlusPlus plugin) {
+    public SmartEventDispatcher() {
+
     }
     
     public void initialize() {
@@ -62,9 +64,20 @@ public class SmartEventDispatcher {
     
     public ServerType detectServerType() {
         try {
-            Class.forName("top.leavesmc.leaves.LeavesConfig");
-            return ServerType.LEAF;
-        } catch (ClassNotFoundException ignored) {}
+            String[] leafClasses = {
+                "io.leafmc.leaf.LeafConfig",
+                "io.leafmc.leaf.LeafLogger",
+                "io.leafmc.leaf.LeafVersion"
+            };
+            
+            for (String leafClass : leafClasses) {
+                try {
+                    Class.forName(leafClass);
+                    return ServerType.LEAF;
+                } catch (ClassNotFoundException ignored) {
+                }
+            }
+        } catch (Exception ignored) {}
 
         try {
             Class.forName("org.purpurmc.purpur.PurpurConfig");
@@ -93,17 +106,16 @@ public class SmartEventDispatcher {
         
         return ServerType.BUKKIT;
     }
-
-    public String getEnvironmentSummary() {
-        ServerType type = detectServerType();
-        boolean isProxy = isProxyEnvironment();
-        boolean hasMultiWorld = Bukkit.getWorlds().size() > 1;
-        
-        return String.format("|环境: %s | 代理模式: %s | 多世界: %s|",
-                           type, isProxy ? "已启用" : "未启用", hasMultiWorld ? "已启用" : "未启用");
-    }
     
     public boolean isUsingMessagingChannel() {
         return useMessagingChannel;
+    }
+    
+    public String getFullEnvironmentInfo() {
+        StringBuilder info = new StringBuilder();
+        
+        ServerType serverType = detectServerType();
+        info.append("       您当前的服务端核心底层架构为: ").append(serverType.name());
+        return info.toString();
     }
 }
