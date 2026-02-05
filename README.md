@@ -34,16 +34,10 @@ gradlew.bat clean build
 
 ## 1.不会编译?
 
-**从 GitHub Actions 下载**
-
-0. 登录github
-
-1. 访问项目的 Actions 页面
-2. 选择最新的 workflow 运行
-3. 下载 `tranforcpp-maven` 或 `tranforcpp-gradle`
-4. 将下载的 JAR 文件放入服务器的 `plugins/` 文件夹
-
-2. 将生成的 `tranforcpp-版本号.jar` 放入服务器的 `plugins/` 文件夹
+**从 GitHub Release 下载**
+1. 下载 `maven-tranforcpp` 或 `gradle-tranforcpp`
+2. 将下载的 JAR 文件放入服务器的 `plugins/` 文件夹
+3. 将生成的 `tranforcpp-版本号.jar` 放入服务器的 `plugins/` 文件夹
 
 ## 2.安装插件
 
