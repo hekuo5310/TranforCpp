@@ -15,7 +15,7 @@ cat > pom.xml << 'EOF'
 
     <groupId>com.github.tranforcpp</groupId>
     <artifactId>TranforCPlusPlus</artifactId>
-    <version>1.1.0</version>
+    <version>1.1.2</version>
     <packaging>jar</packaging>
 
     <name>TranforCPlusPlus</name>
