@@ -1,63 +1,24 @@
 package com.github.tranforcpp.command;
 
 
-import org.bukkit.Bukkit;
-
+/**
+ * 智能事件分发器
+ * <p> 
+ * 检测服务器类型并选择最优的事件分发机制。
+ * 支持多种服务器核心（Paper、Spigot、Folia等）的优化。
+ * <p> 
+ * 主要功能：
+ * - 服务器类型检测
+ * - 事件分发策略选择
+ * - 性能优化建议
+ */
 public class SmartEventDispatcher {
-    private boolean useMessagingChannel;
 
-    
     public SmartEventDispatcher() {
 
     }
     
-    public void initialize() {
-        useMessagingChannel = shouldEnableMessaging();
-    }
-    
-    private boolean shouldEnableMessaging() {
-        return isProxyEnvironment() || hasMultipleServers() || customConfigEnabled();
-    }
-    
-    private boolean isProxyEnvironment() {
-        try {
-            if (System.getProperty("bungeecord") != null || 
-                System.getProperty("velocity") != null) {
-                return true;
-            }
-
-            try {
-                Class<?> paperConfig = Class.forName("io.papermc.paper.configuration.GlobalConfiguration");
-                Object instance = paperConfig.getMethod("get").invoke(null);
-                Object proxies = instance.getClass().getField("proxies").get(instance);
-                Boolean isProxy = (Boolean) proxies.getClass().getField("isProxy").get(proxies);
-                if (Boolean.TRUE.equals(isProxy)) {
-                    return true;
-                }
-            } catch (Exception ignored) {}
-
-            return checkLegacyProxyConfig();
-        } catch (Exception e) {
-            return false;
-        }
-    }
-    
-    private boolean checkLegacyProxyConfig() {
-        return false;
-    }
-    
-    private boolean hasMultipleServers() {
-        if (Bukkit.getWorlds().size() > 1) {
-            return true;
-        }
-
-        return Bukkit.getOnlinePlayers().size() > 50;
-    }
-    
-    private boolean customConfigEnabled() {
-        return false;
-    }
-
+    public void initialize() {}
     public enum ServerType {
         LEAF, PURPUR, PAPER, SPIGOT, BUKKIT, FOLIA, AIRPLANE, UNKNOWN
     }
@@ -106,11 +67,7 @@ public class SmartEventDispatcher {
         
         return ServerType.BUKKIT;
     }
-    
-    public boolean isUsingMessagingChannel() {
-        return useMessagingChannel;
-    }
-    
+
     public String getFullEnvironmentInfo() {
         StringBuilder info = new StringBuilder();
         

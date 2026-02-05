@@ -2,7 +2,14 @@ package com.github.tranforcpp.utils;
 
 /**
  * ANSI颜色代码工具类
- * 提供统一的颜色管理
+ * <p>
+ * 提供终端颜色代码的常量定义和实用方法。
+ * 用于美化控制台输出和日志信息。
+ * <p>
+ * 支持的功能：
+ * - 基础颜色代码
+ * - 渐变文本生成
+ * - 颜色字符串组合
  */
 public class AnsiColorUtils {
 

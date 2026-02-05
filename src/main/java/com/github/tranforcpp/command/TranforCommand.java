@@ -6,15 +6,25 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 
+/**
+ * TranforC++主命令处理器
+ * <p> 
+ * 处理/tranforcpp命令的各种子命令。
+ * 支持插件重载、版本查询等功能。
+ * <p>
+ * 支持的子命令：
+ * - reload: 重新加载C++插件
+ * - version/ver: 显示插件版本信息
+ */
 public class TranforCommand implements CommandExecutor {
     
     private static final MiniMessage MM = MiniMessage.miniMessage();
-    private static final String USAGE_MESSAGE = "<red>用法: /tranforcpp <reload|version>";
+    private static final String USAGE_MESSAGE = "<red>用法: /tranforcpp <reload|version|ver>";
     private static final String PERMISSION_DENIED = "<red>权限不足";
     private static final String RELOAD_START = "<yellow>正在重载...";
     private static final String RELOAD_COMPLETE = "<green>重载完成!";
     private static final String VERSION_PREFIX = "<white>[<aqua>TranforC++<white>] <green>您当前服务器的模块版本为: <green>";
-    private static final String UNKNOWN_COMMAND = "<red>未知指令! 用法: /tranforcpp <reload|version>";
+    private static final String UNKNOWN_COMMAND = "<red>未知指令! 用法: /tranforcpp <reload|version|ver>";
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
@@ -27,7 +37,7 @@ public class TranforCommand implements CommandExecutor {
 
         return switch (subCommand) {
             case "reload" -> handleReload(sender);
-            case "version" -> handleVersion(sender);
+            case "version", "ver" -> handleVersion(sender);
             default -> {
                 sender.sendMessage(MM.deserialize(UNKNOWN_COMMAND));
                 yield true;

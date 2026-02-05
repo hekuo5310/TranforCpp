@@ -9,9 +9,9 @@ import java.util.List;
 
 public class TranforTabCompleter implements TabCompleter {
     
-    private static final String[] ALL_COMMANDS = {"reload", "version"};
+    private static final String[] ALL_COMMANDS = {"reload", "version", "ver"};
     private static final String[] RELOAD_ONLY = {"reload"};
-    private static final String[] VERSION_ONLY = {"version"};
+    private static final String[] VERSION_ONLY = {"version", "ver"};
     private static final String[] EMPTY_ARRAY = new String[0];
 
     @Override

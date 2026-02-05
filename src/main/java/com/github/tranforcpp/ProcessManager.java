@@ -1,18 +1,13 @@
 package com.github.tranforcpp;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
-
-import org.bukkit.Bukkit;
-import org.bukkit.entity.Player;
+import com.github.tranforcpp.compiler.CppCompiler;
+import com.github.tranforcpp.optimizer.SmartThreadOptimizer;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
@@ -26,21 +21,29 @@ import org.bukkit.event.hanging.HangingBreakEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
 import org.bukkit.event.inventory.InventoryOpenEvent;
-
-import org.bukkit.event.player.PlayerDropItemEvent;
-import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerMoveEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.event.player.PlayerRespawnEvent;
+import org.bukkit.event.player.*;
 import org.bukkit.event.server.ServerCommandEvent;
 import org.bukkit.event.weather.WeatherChangeEvent;
 import org.bukkit.event.world.WorldLoadEvent;
+import java.io.*;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
-import com.github.tranforcpp.compiler.CppCompiler;
-import com.google.gson.Gson;
-import com.google.gson.JsonObject;
-
+/**
+ * 进程管理器
+ * <p>
+ * 负责管理C++插件进程的生命周期，包括启动、停止、消息传递等功能。
+ * 实现了Bukkit事件监听器，用于捕获游戏事件并转发给C++插件。
+ * <p>
+ * 主要功能：
+ * - 启动和管理C++进程
+ * - 处理进程间通信
+ * - 批量事件处理优化
+ * - 智能资源管理
+ */
 public class ProcessManager implements Listener {
 
     private final TranforCPlusPlus plugin;
@@ -48,31 +51,36 @@ public class ProcessManager implements Listener {
     private BufferedReader inputReader;
     private BufferedWriter outputWriter;
     private final Gson gson = new Gson();
-    private final java.util.concurrent.ArrayBlockingQueue<JsonObject> messageQueue = 
-        new java.util.concurrent.ArrayBlockingQueue<>(MAX_QUEUE_SIZE);
+    private final BlockingQueue<JsonObject> messageQueue = new ArrayBlockingQueue<>(MAX_QUEUE_SIZE);
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicLong messageCounter = new AtomicLong(0);
     private volatile Thread readerThread;
-    private volatile java.util.concurrent.ExecutorService senderExecutor;
-    private final java.util.concurrent.atomic.AtomicInteger activeSenders = 
-        new java.util.concurrent.atomic.AtomicInteger(0);
+    private volatile ExecutorService senderExecutor;
+    private final AtomicInteger activeSenders = new AtomicInteger(0);
     private final MiniMessage miniMessageInstance;
 
     private static final int MAX_QUEUE_SIZE = 2000;
     private static final int CORE_SENDER_THREADS = 2;
+    private static final int FLUSH_THRESHOLD = 20;
+    private static final int PROCESS_TERMINATION_TIMEOUT = 3;
+    private static final int FORCE_TERMINATION_TIMEOUT = 1;
+    private static final long RESTART_DELAY_MS = 100;
 
     public ProcessManager(TranforCPlusPlus plugin) {
         this.plugin = plugin;
         this.miniMessageInstance = MiniMessage.miniMessage();
-        Bukkit.getPluginManager().registerEvents(this, plugin);
+
     }
 
     public void start() {
         try {
-            File cppDir = new File(plugin.getDataFolder().getParentFile(), "C+plugins");
+
+            Bukkit.getPluginManager().registerEvents(this, plugin);
+            
+            File cppDir = new File(plugin.getDataFolder().getParentFile(), "C++ Plugins");
             if (!cppDir.exists()) {
                 if (!cppDir.mkdirs()) {
-                    plugin.getLogger().severe("Failed to create C+plugins directory: " + cppDir.getAbsolutePath());
+                    plugin.getLogger().severe("Failed to create C++ Plugins directory: " + cppDir.getAbsolutePath());
                 }
             }
 
@@ -118,26 +126,81 @@ public class ProcessManager implements Listener {
                     }
                 } catch (Exception e) {
                     plugin.getLogger().warning("Failed to parse C++ message: " + line);
+                    // 继续处理后续消息
                 }
             }
         } catch (IOException e) {
             if (running.get() && process != null && process.isAlive()) {
                 plugin.getLogger().severe("Error reading from C++ process: " + e.getMessage());
             }
+            // 正常的连接断开不需要记录错误
+        }
+    }
+    
+    private void handleExecuteCommand(JsonObject json) {
+        try {
+            String command = json.get("command").getAsString();
+            if (command != null && !command.trim().isEmpty()) {
+                Bukkit.dispatchCommand(Bukkit.getConsoleSender(), command);
+            }
+        } catch (Exception e) {
+            plugin.getLogger().warning("执行命令失败: " + e.getMessage());
         }
     }
 
-    private void initializeSenderExecutor() {
-        senderExecutor = java.util.concurrent.Executors.newFixedThreadPool(
-            CORE_SENDER_THREADS,
-            r -> {
-                Thread t = new Thread(r, "TranforC++-Sender-" + activeSenders.incrementAndGet());
-                t.setDaemon(true);
-                t.setPriority(Thread.NORM_PRIORITY - 1);
-                return t;
+    private ExecutorService createSmartThreadPoolAdapter() {
+        return new AbstractExecutorService() {
+            private final ExecutorService delegate = Executors.newFixedThreadPool(
+                CORE_SENDER_THREADS,
+                r -> {
+                    Thread t = new Thread(r, "TranforC++-SmartSender-" + activeSenders.incrementAndGet());
+                    t.setDaemon(true);
+                    t.setPriority(Thread.NORM_PRIORITY - 1);
+                    return t;
+                }
+            );
+            
+            @Override
+            public void execute(Runnable command) {
+                SmartThreadOptimizer optimizer = plugin.getThreadOptimizer();
+                if (optimizer != null) {
+                    optimizer.submitTask(command);
+                } else {
+                    delegate.execute(command);
+                }
             }
-        );
+            
+            // 委托所有ExecutorService方法到实际的线程池
+            @Override public void shutdown() { delegate.shutdown(); }
+            @Override public List<Runnable> shutdownNow() { return delegate.shutdownNow(); }
+            @Override public boolean isShutdown() { return delegate.isShutdown(); }
+            @Override public boolean isTerminated() { return delegate.isTerminated(); }
+            @Override public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException { 
+                return delegate.awaitTermination(timeout, unit); 
+            }
+            @Override public <T> Future<T> submit(Callable<T> task) { return delegate.submit(task); }
+            @Override public <T> Future<T> submit(Runnable task, T result) { return delegate.submit(task, result); }
+            @Override public Future<?> submit(Runnable task) { return delegate.submit(task); }
+            @Override public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> tasks) throws InterruptedException { 
+                return delegate.invokeAll(tasks); 
+            }
+            @Override public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> tasks, long timeout, TimeUnit unit) throws InterruptedException { 
+                return delegate.invokeAll(tasks, timeout, unit); 
+            }
+            @Override public <T> T invokeAny(Collection<? extends Callable<T>> tasks) throws InterruptedException, ExecutionException { 
+                return delegate.invokeAny(tasks); 
+            }
+            @Override public <T> T invokeAny(Collection<? extends Callable<T>> tasks, long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException { 
+                return delegate.invokeAny(tasks, timeout, unit); 
+            }
+        };
+    }
+
+    private void initializeSenderExecutor() {
+
+        senderExecutor = createSmartThreadPoolAdapter();
         
+        // 初始化消息发送工作者线程
         for (int i = 0; i < CORE_SENDER_THREADS; i++) {
             senderExecutor.submit(this::sendMessagesWorker);
         }
@@ -146,17 +209,21 @@ public class ProcessManager implements Listener {
     private void sendMessagesWorker() {
         try {
             while (running.get() && process != null && process.isAlive()) {
-                JsonObject msg = messageQueue.poll(50, java.util.concurrent.TimeUnit.MILLISECONDS);
+                JsonObject msg = messageQueue.poll(50, TimeUnit.MILLISECONDS);
                 if (msg != null) {
                     outputWriter.write(gson.toJson(msg));
                     outputWriter.newLine();
-                    if (messageQueue.size() < 20) {
+                    // 当队列较小时立即刷新以减少延迟
+                    if (messageQueue.size() < FLUSH_THRESHOLD) {
                         outputWriter.flush();
                     }
                     messageCounter.incrementAndGet();
                 }
             }
-        } catch (InterruptedException | IOException e) {
+        } catch (InterruptedException e) {
+            // 线程被中断是正常的关闭过程
+            Thread.currentThread().interrupt();
+        } catch (IOException e) {
             if (running.get()) {
                 plugin.getLogger().warning("Error in message sender worker: " + e.getMessage());
             }
@@ -176,6 +243,9 @@ public class ProcessManager implements Listener {
                     break;
                 case "console":
                     plugin.getLogger().info(json.get("message").getAsString());
+                    break;
+                case "executeCommand":
+                    handleExecuteCommand(json);
                     break;
                 default:
                     plugin.getLogger().warning("Unknown action: " + action);
@@ -211,10 +281,11 @@ public class ProcessManager implements Listener {
         }
     }
 
-    private final java.util.Queue<JsonObject> batchBuffer = new java.util.LinkedList<>();
+    private final Queue<JsonObject> batchBuffer = new LinkedList<>();
     private static final int BATCH_SIZE = 30;
     private static final long BATCH_TIMEOUT_MS = 50;
-    private static final int MAX_BATCH_PROCESSING_TIME = 5; // 毫秒
+    private static final int MAX_BATCH_PROCESSING_TIME = 5;
+    private static final double QUEUE_SPACE_THRESHOLD = 0.8;
     private volatile long lastBatchTime = System.currentTimeMillis();
     
     public void sendEvent(String eventName, Object... args) {
@@ -239,6 +310,7 @@ public class ProcessManager implements Listener {
             
             synchronized (batchBuffer) {
                 batchBuffer.offer(json);
+                // 批处理触发条件：达到批次大小或超时
                 if (batchBuffer.size() >= BATCH_SIZE || 
                     System.currentTimeMillis() - lastBatchTime > BATCH_TIMEOUT_MS) {
                     flushBatch();
@@ -256,22 +328,24 @@ public class ProcessManager implements Listener {
         if (batchBuffer.isEmpty()) return;
         
         long startTime = System.nanoTime();
-        java.util.List<JsonObject> batch = new java.util.ArrayList<>(Math.min(batchBuffer.size(), BATCH_SIZE));
+        List<JsonObject> batch = new ArrayList<>(Math.min(batchBuffer.size(), BATCH_SIZE));
         JsonObject msg;
         int processed = 0;
         
+        // 构建批处理消息
         while (processed < BATCH_SIZE && (msg = batchBuffer.poll()) != null) {
             batch.add(msg);
             processed++;
             
-            // 防止单次批处理时间过长
+            // 防止批处理时间过长影响性能
             if ((System.nanoTime() - startTime) / 1_000_000 > MAX_BATCH_PROCESSING_TIME) {
                 break;
             }
         }
         
         if (!batch.isEmpty()) {
-            boolean queueHasSpace = messageQueue.size() < (MAX_QUEUE_SIZE * 0.8);
+            // 检查队列空间，避免阻塞
+            boolean queueHasSpace = messageQueue.size() < (MAX_QUEUE_SIZE * QUEUE_SPACE_THRESHOLD);
             if (queueHasSpace) {
                 messageQueue.addAll(batch);
                 synchronized (messageQueue) {
@@ -289,10 +363,6 @@ public class ProcessManager implements Listener {
         try {
             org.bukkit.event.Event customEvent = createCustomEvent(eventName, args);
             Bukkit.getPluginManager().callEvent(customEvent);
-
-            if (plugin.getMessagingManager() != null) {
-                plugin.getMessagingManager().broadcastEvent(eventName, args);
-            }
         } catch (Exception e) {
             plugin.getLogger().warning("事件分发失败: " + e.getMessage());
         }
@@ -345,33 +415,17 @@ public class ProcessManager implements Listener {
         }
 
         if (process != null) {
-            process.destroy();
-            try {
-                if (!process.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)) {
-                    process.destroyForcibly();
-                    process.waitFor(1, java.util.concurrent.TimeUnit.SECONDS);
-                }
-            } catch (InterruptedException e) {
-                plugin.getLogger().warning("Interrupted while waiting for process to terminate: " + e.getMessage());
-                Thread.currentThread().interrupt();
-            }
+            gracefullyTerminateProcess();
         }
 
         if (readerThread != null && readerThread.isAlive()) {
             readerThread.interrupt();
         }
         if (senderExecutor != null && !senderExecutor.isShutdown()) {
-            senderExecutor.shutdown();
-            try {
-                if (!senderExecutor.awaitTermination(3, java.util.concurrent.TimeUnit.SECONDS)) {
-                    senderExecutor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                senderExecutor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
+            shutdownExecutorService(senderExecutor);
         }
 
+        // 清理资源引用
         readerThread = null;
         senderExecutor = null;
         inputReader = null;
@@ -385,7 +439,7 @@ public class ProcessManager implements Listener {
     public void restart() {
         stop();
         try {
-            Thread.sleep(100);
+            Thread.sleep(RESTART_DELAY_MS);
         } catch (InterruptedException e) {
             plugin.getLogger().warning("Interrupted during restart delay: " + e.getMessage());
             Thread.currentThread().interrupt();
@@ -504,5 +558,42 @@ public class ProcessManager implements Listener {
     @EventHandler
     public void onHangingBreak(HangingBreakEvent event) {
         sendEvent("HangingBreak", event.getEntity().getType().name(), event.getCause().name());
+    }
+    
+    /**
+     * 优雅地终止C++进程
+     */
+    private void gracefullyTerminateProcess() {
+        try {
+            process.destroy();
+            if (!process.waitFor(PROCESS_TERMINATION_TIMEOUT, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                process.waitFor(FORCE_TERMINATION_TIMEOUT, TimeUnit.SECONDS);
+            }
+        } catch (InterruptedException e) {
+            plugin.getLogger().warning("Interrupted while waiting for process to terminate: " + e.getMessage());
+            Thread.currentThread().interrupt();
+        }
+    }
+    
+    /**
+     * 安全关闭ExecutorService
+     */
+    private void shutdownExecutorService(ExecutorService executor) {
+        if (executor != null && !executor.isShutdown()) {
+            executor.shutdown();
+            try {
+                if (!executor.awaitTermination(3, TimeUnit.SECONDS)) {
+                    executor.shutdownNow();
+                    if (!executor.awaitTermination(1, TimeUnit.SECONDS)) {
+                        plugin.getLogger().warning("senderExecutor" + " failed to terminate properly");
+                    }
+                }
+            } catch (InterruptedException e) {
+                executor.shutdownNow();
+                Thread.currentThread().interrupt();
+                plugin.getLogger().warning("senderExecutor" + " shutdown interrupted: " + e.getMessage());
+            }
+        }
     }
 }
