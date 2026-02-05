@@ -6,7 +6,7 @@
 ## 赞助商
 - [HKMC云](https://cloud.hkmc.online/) 请选择销售时选择Xiao_Q以获得Xiao_Q专属福利
 - [各种AI免费api](https://qm.qq.com/q/XNgDgosu4M)
-- D.R.C Minecraft服务器 [官网](https://www.drc-org.top/) [Q群](https://qm.qq.com/q/sxfJuRzpAI)
+- D.R.C Minecraft服务器 [官网](https://www.drc-org.top/)
 ---
 
 ## 使用方法
