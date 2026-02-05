@@ -90,7 +90,7 @@ jobs:
       - name: Extract version
         id: version
         run: |
-          VERSION=$(grep -oP '^version:\s*['\''"]\K[0-9.]+' src/main/resources/paper-plugin.yml || echo "1.1.0")
+          VERSION=$(grep -oP '^version:\s*['\''"]\K[0-9.]+' src/main/resources/paper-plugin.yml || echo "1.1.2")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Create Release
