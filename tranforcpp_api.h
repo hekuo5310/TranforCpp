@@ -54,7 +54,7 @@ void broadcast(const char* message) {
     tranforcpp::sendMessage("broadcast", oss.str());
 }
 
-void sendMsg(const char* player, const char* message) {
+void sendMessage(const char* player, const char* message) {
     std::ostringstream oss;
     oss << R"({"action":"sendMessage","player":")" << player
         << R"(","message":")" << message << R"("})";
