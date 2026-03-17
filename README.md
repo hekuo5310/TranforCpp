@@ -2,9 +2,6 @@
 
 用 C++ 编写 Spigot 插件
 
-已停更，可以看我们的新项目
-[Rootree](https://github.com/Xiao-QDev/Rootree) 更换了实现的方式为重写服务端
-
 ---
 ## 赞助商
 - [HKMC云](https://cloud.hkmc.online/) 请选择销售时选择Xiao_Q以获得Xiao_Q专属福利
